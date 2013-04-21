@@ -1,0 +1,57 @@
+.TH BOOTCHARTD.CONF 5 2006-04-09
+.\" Please adjust this date whenever revising the manpage.
+.SH NAME
+bootchartd.conf \- configuration file for \fBbootchartd\fP
+.SH SYNOPSIS
+.B \fB/etc/bootchartd.conf\fP
+.SH DESCRIPTION
+\fBbootchartd.conf\fP contains configuration options for the
+\fBbootchartd\fP logger.  The available options:
+.TP
+.I TMPFS_SIZE
+If the root file system is not writable at startup, \fBbootchartd\fP
+mounts a hidden temporary file system in /mnt to store its log files.
+This options controls the size of this file system. default: 32m
+
+.TP
+.I SAMPLE_PERIOD
+Sampling period, in seconds.
+default: 0.2
+
+.TP
+.I PROCESS_ACCOUNTING
+Whether to utilize BSD process accounting for a more accurate process
+tree.  Note that the kernel needs to be configured to include
+CONFIG_BSD_PROCESS_ACCT_V3.  \fBaccton(8)\fP from the GNU accounting
+utilities is also required.
+default: no
+
+.TP
+.I BOOTLOG_DEST
+Log file tarball destination.
+default: /var/log/bootchart.tgz
+
+.TP
+.I AUTO_RENDER
+Whether to automatically generate the boot chart once the boot logger
+completes.  The boot chart will be generated in AUTO_RENDER_DIR.
+default: no
+
+.TP
+.I AUTO_RENDER_FORMAT
+Image format to use for the auto-generated boot chart (choose between
+png, svg and eps).
+default: png
+
+.TP
+.I AUTO_RENDER_DIR
+Output directory for auto-generated boot charts.
+default: /var/log
+
+.SH SEE ALSO
+.BR bootchartd(1),
+.SH AUTHOR
+bootchart was written by Ziga Mahkovec <ziga.mahkovec@klika.si>.
+.PP
+This manual page was written by J\[:o]rg Sommer <joerg@alea.gnuu.de>,
+for the Debian project (but may be used by others).

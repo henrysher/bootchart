@@ -1,0 +1,303 @@
+#!/bin/sh
+#
+# Bootchart logger script
+# Ziga Mahkovec  <ziga.mahkovec@klika.si>
+#
+# This script is used for data collection for the bootchart
+# boot performance visualization tool (http://www.bootchart.org).
+#
+# To profile the boot process, bootchartd should be called instead of
+# /sbin/init.  Modify the kernel command line to include
+# init=/sbin/bootchartd or rdinit=/sbin/bootchartd if you use an initrd
+#
+# bootchartd will then start itself in background and exec /sbin/init or
+# /init in case of an inird (or an alternative init process if specified
+# using bootchart_init=)
+#
+# To profile a running system, run:
+# $ /sbin/bootchartd start; sleep 30; /sbin/bootchartd stop
+#
+
+PATH="/sbin:/bin:/usr/sbin:/usr/bin:$PATH"
+VERSION="0.9"
+
+# Read configuration.
+CONF="/etc/bootchartd.conf"
+if [ -f $PWD/bootchartd.conf ]; then
+	. $PWD/bootchartd.conf
+elif [ -f $CONF ]; then
+        . $CONF
+else
+        echo "$CONF missing"
+        exit 1
+fi
+
+log_cmd_1="cat /proc/stat"
+log_target_1=proc_stat.log
+
+# /proc/diskstats is available in 2.6 kernels
+log_cmd_2="cat /proc/diskstats"
+log_target_2=proc_diskstats.log
+
+log_cmd_3="cat /proc/[1-9]*/stat 2>/dev/null"
+log_target_3=proc_ps.log
+
+# Uncomment this line for diskless stations
+#log_cmd_4="cat /proc/net/dev"
+#log_target_4=proc_netdev.log
+
+max_log=3
+
+setup_environment()
+{
+	# Mount the temporary file system for log file storage.  If possible,
+	# a temporary directory is created.  In most cases though (i.e. during
+	# boot), a tmpfs is mounted in /mnt.  The mount point is immediately
+	# released using a lazy umount, so the script must never leave that
+	# directory.
+	if command -v mktemp > /dev/null
+	then
+		LOG_DIR="$( mktemp -q -t -d bootchart.XXXXXX )"
+	fi
+	if [ -z "$LOG_DIR" ]; then
+		LOG_DIR="/mnt"
+		LAZY_UMOUNT="yes"
+		mount -n -t tmpfs -o size=$TMPFS_SIZE none "$LOG_DIR" >/dev/null 2>&1
+		cd "$LOG_DIR"
+		umount -nfl "$LOG_DIR" || umount -fl "$LOG_DIR"
+	else
+		cd "$LOG_DIR"
+	fi
+}
+
+do_logging()
+{
+	# Enable process accounting if configured
+	if [ "$PROCESS_ACCOUNTING" = "yes" ]; then
+		[ -e kernel_pacct ] || : > kernel_pacct
+		accton kernel_pacct
+	fi
+
+	# open file descriptors
+	i=1
+	while [ $i -le $max_log ]; do
+		eval target=\"\$log_target_$i\"
+		if [ -z "$target" ]; then
+			max_log=$i
+			break
+		fi
+
+		fd=$((2 + $i))
+		eval exec $fd'>>$target'
+		eval log_fd_$i=$fd
+		i=$(($i + 1))
+	done
+
+	not_stop_logging=true
+	while $not_stop_logging && \
+	{ [ -z "$exit_proc" ] || pidof $exit_proc >/dev/null; }; do
+		if [ -r /proc/uptime ]; then
+			# Write the time (in jiffies).
+			read uptime < /proc/uptime
+			uptime=${uptime%% [0-9]*}
+			uptime=${uptime%.*}${uptime#*.}
+
+			i=1
+			while [ $i -le $max_log ]; do
+				eval fd=\$log_fd_$i\; cmd=\$log_cmd_$i
+
+				{
+					echo $uptime
+					# Log the command output
+					eval $cmd
+					echo
+				} >&$fd
+				i=$(($i + 1))
+			done
+		fi
+
+		sleep $SAMPLE_PERIOD
+	done
+
+	# close file descriptors
+	i=1
+	while [ $i -le $max_log ]; do
+		eval fd=\$log_fd_$i
+		eval exec $fd'>&-'
+		i=$(($i + 1))
+	done
+
+	[ -e kernel_pacct ] && accton off
+}
+
+# Stop the boot logger.  The lock file is removed to force the loggers in
+# background to exit.  Some final log files are created and then all log files
+# from the tmpfs are packaged and stored in $BOOTLOG_DEST.
+finalize()
+{
+	# Stop process accounting if configured
+	local pacct=
+	[ -e kernel_pacct ] && pacct=kernel_pacct
+
+	# Write system information
+	# Log some basic information about the system.
+	(
+		echo "version = $VERSION"
+		echo "title = Boot chart for $( hostname | sed q ) ($( date ))"
+		echo "system.uname = $( uname -srvm | sed q )"
+		if [ -f /etc/gentoo-release ]; then
+			echo "system.release = $( sed q /etc/gentoo-release )"
+		elif [ -f /etc/SuSE-release ]; then
+			echo "system.release = $( sed q /etc/SuSE-release )"
+		elif [ -f /etc/debian_version ]; then
+			echo "system.release = Debian GNU/$( uname -s ) $( cat /etc/debian_version )"
+		elif [ -f /etc/frugalware-release ]; then
+			echo "system.release = $( sed q /etc/frugalware-release )"
+		elif [ -f /etc/pardus-release ]; then
+			echo "system.release = $( sed q /etc/pardus-release )"
+		else
+			echo "system.release = $( sed 's/\\.//g;q' /etc/issue )"
+		fi
+
+		# Get CPU count
+		local cpucount=$(grep -c '^processor' /proc/cpuinfo)
+		if [ $cpucount -gt 1 -a -n "$(grep 'sibling.*2' /proc/cpuinfo)" ]; then
+			# Hyper-Threading enabled
+			cpucount=$(( $cpucount / 2 ))
+		fi
+		if grep -q '^model name' /proc/cpuinfo; then
+			echo "system.cpu = $( grep '^model name' /proc/cpuinfo | sed q )"\
+			     "($cpucount)"
+		else
+			echo "system.cpu = $( grep '^cpu' /proc/cpuinfo | sed q )"\
+			     "($cpucount)"
+		fi
+
+		echo "system.kernel.options = $( sed q /proc/cmdline )"
+	) >> header
+
+	# Package log files
+	tar -zcf "$BOOTLOG_DEST" header $pacct *.log
+	if [ -z "$LAZY_UMOUNT" ]; then
+		rm "$LOG_DIR"/*
+		rmdir "$LOG_DIR"
+	fi
+
+	# Render the chart if configured (and the renderer is installed)
+	[ "$AUTO_RENDER" = "yes" -a -x /usr/bin/bootchart ] && \
+		/usr/bin/bootchart -o "$AUTO_RENDER_DIR" -f $AUTO_RENDER_FORMAT "$BOOTLOG_DEST"
+}
+
+if [ $$ -eq 1 ] || [ "$1" = init ]; then
+	# Started by the kernel or by the init script.
+	echo "Starting bootchart logging"
+	setup_environment
+	if [ "$AUTO_STOP_LOGGER" = yes ]; then
+		local runlevel=$( sed -n '/^ *#/d; s/.*:\(.*\):initdefault:.*/\1/g; p; q' /etc/inittab )
+
+		# The processes we have to wait for
+		local exit_proc="gdmgreeter gdm-binary kdm_greet kdm"
+		# early_login in FC4 starts gdm early, so fall back to mingetty
+		local early_login="no"
+		grep -q early_login /proc/cmdline && early_login="yes"
+		if [ "$runlevel" -eq "2" -o "$runlevel" -eq "3" -o "$early_login" = "yes" ]; then
+			exit_proc="mingetty agetty rungetty getty fgetty"
+		fi
+	else
+		exit_proc=
+	fi
+
+	(
+		trap "not_stop_logging=false" USR1
+		reexec=false
+		trap "reexec=true; not_stop_logging=false" USR2
+
+		do_logging
+		if $reexec; then
+			log_dir="$(chroot /root /bin/sh -c 'mktemp -q -t -d bootchart.XXXXXX ||
+			{ mount -n -t tmpfs -o size=$TMPFS_SIZE none /mnt && echo /mnt; }' 2>/dev/null)"
+			[ "$log_dir" = /mnt ] && lazy_umount=yes
+			mv * /root"$log_dir"
+
+			exec chroot /root /sbin/bootchartd continue_logging \
+			"$log_dir" "$lazy_umount" </root/dev/null \
+			>/root/dev/console 2>&1
+		else
+			sleep $SAMPLE_PERIOD
+			sleep $SAMPLE_PERIOD
+			finalize
+		fi
+        ) &
+
+	if [ $$ -eq 1 ]; then
+		# Optionally, an alternative init(1) process may be specified using
+		# the kernel command line (e.g. "bootchart_init=/sbin/initng")
+		for init in "${bootchart_init}" /init /sbin/init; do
+		        if [ -x "$init" ]; then
+		                exec $init "$@"
+		        fi
+		done
+		echo No init program found
+		exit 1
+	fi
+	exit 0
+fi
+
+case "$1" in
+	"start")
+		# Started by the user
+		shift
+		setup_environment
+		(
+			trap "not_stop_logging=false" USR1
+			do_logging
+			finalize
+		) &
+		logger_pid=$!
+
+		if [ "$#" -gt 0 ]; then
+			# If a command was passed, run it
+			# (used for profiling specific applications)
+			echo "profile.process = $( basename $1 )" >> header
+			"$@"
+			kill -USR1 $logger_pid
+		else
+			echo "profile.process = (all)" >> header
+		fi
+		;;
+	"stop")
+		# We get the signal, too. But we ignore it.
+		trap : USR1
+		# Signal all background processes to stop logging
+		killall --exact -USR1 bootchartd
+		;;
+	continue_logging)
+		LOG_DIR=$2
+		LAZY_UMOUNT=$3
+
+		cd "$LOG_DIR"
+		[ "$LAZY_UMOUNT" = yes ] && umount -nfl "$LOG_DIR"
+
+		if [ "$AUTO_STOP_LOGGER" = yes ]; then
+			local runlevel=$( sed -n '/^ *#/d; s/.*:\(.*\):initdefault:.*/\1/g; p; q' /etc/inittab )
+
+			# The processes we have to wait for
+			local exit_proc="gdmgreeter gdm-binary kdm_greet kdm"
+			# early_login in FC4 starts gdm early, so fall back to mingetty
+			local early_login="no"
+			grep -q early_login /proc/cmdline && early_login="yes"
+			if [ "$runlevel" -eq "2" -o "$runlevel" -eq "3" -o "$early_login" = "yes" ]; then
+				exit_proc="mingetty agetty rungetty getty fgetty"
+			fi
+		else
+			exit_proc=
+		fi
+		trap "not_stop_logging=false" USR1
+		do_logging
+		finalize
+		;;
+	*)
+		echo "Usage: $0 {init|start|stop}"
+		;;
+esac
+

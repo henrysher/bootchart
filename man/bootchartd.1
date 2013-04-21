@@ -1,0 +1,65 @@
+.TH BOOTCHARTD 1 2008-08-19
+.\" Please adjust this date whenever revising the manpage.
+.SH NAME
+bootchartd \- collects process information, CPU statistics and disk usage
+statistics
+.SH SYNOPSIS
+.B bootchartd [start [cmd]|init|stop]
+.SH DESCRIPTION
+\fBbootchartd\fP collects process information, CPU statistics and disk
+usage statistics from the \fI/proc/\fP file system.  The accumulated
+log file may later be visualized using \fBbootchart(1)\fP.
+.PP
+\fBbootchartd\fP is commonly used to profile the boot process for the
+purpose of speeding it up.  In this case, it is started by the kernel
+as the init process.  This is configured by adding the
+option \fBrdinit=/sbin/bootchartd\fP or
+\fBinit=/sbin/bootchartd\fP to the kernel command line\[em]either
+interactively or by editing the bootloader's configuration file. The
+option \fBrdinit=\fP is needed, if you boot from an initrd and want to
+monitor the boot scripts from the initrd. Otherwise the option
+\fBinit=\fP is the correct one. Please
+refer to the documentation of your bootloader for details (e.g. lilo,
+grub or yaboot).
+.PP
+After \fBbootchartd\fP is initialized during the boot process, it will
+start the default init process (\fI/sbin/init\fP or \fI/init\fP on an
+initrd) to proceed with the
+regular bootup.  If, however, an alternative init process is used
+(e.g. \fI/sbin/initng\fP), that process may be specified using the
+kernel command line parameter \fBbootchart_init=\fIINIT\fR or start
+\fBbootchartd\fP from an init script with the option \fBinit\fP. In both
+cases, \fBbootchartd\fP tries to guess when the system is up by looking
+for processes like getty, kdm and gdb. When it thinks the system is up it
+writes the log file to \fI/var/log/bootchart.tgz\fP and quits.
+.PP
+If you start \fBbootchartd\fP on an initrd it might become necessary to
+restart the \fBbootchartd\fP process on the real root filesystem to
+unmount the initrd and continue the monitoring. This can be done by
+sending the signal USR2 to the bootchartd process, after you've mounted
+the root filesystem. \fBBootchartd\fP assumes to find the root filesystem
+in \fI/root\fP and the \fBbootchartd\fP executable in
+\fI/root/sbin\fP.
+.PP
+Another possibility for using \fBbootchartd\fP is monitoring the
+resource usage of a specific application or the running system in
+general.  In this case, bootchartd is started interactively by
+running \fBbootchartd start\fP and stopped using
+\fBbootchartd stop\fP. Or you pass a command with all options to
+\fBbootchartd start\fP. Then \fBbootchartd\fP stops when the command
+returns.
+.SH FILES
+.TP
+/var/log/bootchartd.tgz
+default output file
+.TP
+/etc/bootchartd.conf
+default configuration file
+.SH SEE ALSO
+.BR bootchart(1),
+.BR bootchartd.conf(5)
+.SH AUTHOR
+bootchart was written by Ziga Mahkovec <ziga.mahkovec@klika.si>.
+.PP
+This manual page was written by J\[:o]rg Sommer <joerg@alea.gnuu.de>,
+for the Debian project (but may be used by others).

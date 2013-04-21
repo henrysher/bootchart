@@ -1,0 +1,43 @@
+.TH BOOTCHART 1 2006-03-05
+.\" Please adjust this date whenever revising the manpage.
+.SH NAME
+bootchart \- render a chart from the statistical data recorded with \fBbootchartd\fP
+.SH SYNOPSIS
+.B bootchart [-f|--format \fIFORMAT\fP] [-n|--no-prune] [-o|--output-dir
+.B \fIDIR\fP] \fIfiles\fP ...
+.SH DESCRIPTION
+bootchart is used to process the log file created by \fBbootchartd(1)\fP
+(\fI/var/log/bootchart.tgz\fP by default).  bootchart builds the process
+tree and renders a performance chart in different formats.  The chart may
+then be analyzed to examine process dependency and overall resource
+utilization.
+.SH OPTIONS
+.TP
+.B \-f,\-\-format \fIFORMAT\fP
+Sets the format of the image. Possible values are: png, eps, svg (default)
+.TP
+.B \-h, \-\-help
+Display brief usage message.
+.TP
+.B \-n, \-\-no\-prune
+Do not prune the process tree.  To make the resulting process tree more
+comprehensible, bootchart will prune the tree using various techniques
+(removing short-lived processes, merging processes, etc.).  This option
+disables such behavior.
+.TP
+.B \-o, \-\-output\-dir \fIDIR\fP
+Sets the output directory for the resulting image. (default: .)
+.TP
+.B \-v, \-\-version
+Show program version.
+.SH FILES
+.TP
+/var/log/bootchart.tgz
+the default log file to parse (unless otherwise specified).
+.SH SEE ALSO
+.BR bootchartd (1)
+.SH AUTHOR
+bootchart was written by Ziga Mahkovec <ziga.mahkovec@klika.si>.
+.PP
+This manual page was written by J\[:o]rg Sommer <joerg@alea.gnuu.de>,
+for the Debian project (but may be used by others).
